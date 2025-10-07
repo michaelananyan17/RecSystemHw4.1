@@ -1,96 +1,134 @@
-class TwoTowerModel {
+/**
+ * SimpleTwoTowerModel: A basic two-tower model using only embedding lookups.
+ * This model learns a latent vector (embedding) for each user and item.
+ * Recommendations are based on the dot product similarity between these embeddings.
+ */
+class SimpleTwoTowerModel {
     constructor(numUsers, numItems, embeddingDim) {
         this.numUsers = numUsers;
         this.numItems = numItems;
         this.embeddingDim = embeddingDim;
         
-        // Initialize embedding tables with small random values
-        // Two-tower architecture: separate user and item embeddings
-        this.userEmbeddings = tf.variable(
-            tf.randomNormal([numUsers, embeddingDim], 0, 0.05), 
-            true, 
-            'user_embeddings'
-        );
+        // User and item embeddings are the only trainable parameters.
+        this.userEmbeddings = tf.variable(tf.randomNormal([numUsers, embeddingDim], 0, 0.05), true, 'user_embeddings_simple');
+        this.itemEmbeddings = tf.variable(tf.randomNormal([numItems, embeddingDim], 0, 0.05), true, 'item_embeddings_simple');
         
-        this.itemEmbeddings = tf.variable(
-            tf.randomNormal([numItems, embeddingDim], 0, 0.05), 
-            true, 
-            'item_embeddings'
-        );
-        
-        // Adam optimizer for stable training
         this.optimizer = tf.train.adam(0.001);
     }
     
-    // User tower: simple embedding lookup
+    // User tower: simply looks up the embedding for a given user index.
     userForward(userIndices) {
         return tf.gather(this.userEmbeddings, userIndices);
     }
     
-    // Item tower: simple embedding lookup  
+    // Item tower: simply looks up the embedding for a given item index.  
     itemForward(itemIndices) {
         return tf.gather(this.itemEmbeddings, itemIndices);
     }
     
-    // Scoring function: dot product between user and item embeddings
-    // Dot product is efficient and commonly used in retrieval systems
-    score(userEmbeddings, itemEmbeddings) {
-        return tf.sum(tf.mul(userEmbeddings, itemEmbeddings), -1);
-    }
-    
     async trainStep(userIndices, itemIndices) {
-        return await tf.tidy(() => {
-            const userTensor = tf.tensor1d(userIndices, 'int32');
-            const itemTensor = tf.tensor1d(itemIndices, 'int32');
+        const loss = () => tf.tidy(() => {
+            const userEmbs = this.userForward(userIndices);
+            const itemEmbs = this.itemForward(itemIndices);
             
-            // In-batch sampled softmax loss:
-            // Use all items in batch as negatives for each user
-            // Diagonal elements are positive pairs
-            const loss = () => {
-                const userEmbs = this.userForward(userTensor);
-                const itemEmbs = this.itemForward(itemTensor);
-                
-                // Compute similarity matrix: batch_size x batch_size
-                const logits = tf.matMul(userEmbs, itemEmbs, false, true);
-                
-                // Labels: diagonal elements are positives
-                // Use int32 tensor for oneHot indices
-                const labels = tf.oneHot(
-                    tf.range(0, userIndices.length, 1, 'int32'), 
-                    userIndices.length
-                );
-                
-                // Softmax cross entropy loss
-                // This encourages positive pairs to have higher scores than negatives
-                const loss = tf.losses.softmaxCrossEntropy(labels, logits);
-                return loss;
-            };
+            // In-batch sampled softmax loss.
+            // For each (user, item) pair in the batch, all other items in the batch are treated as negatives.
+            const logits = tf.matMul(userEmbs, itemEmbs, false, true); // Shape: [batch, batch]
             
-            // Compute gradients and update embeddings
-            const { value, grads } = this.optimizer.computeGradients(loss);
+            // The diagonal of the logits matrix corresponds to the positive (user, item) pairs.
+            const labels = tf.oneHot(tf.range(0, userIndices.length, 1, 'int32'), userIndices.length);
             
-            this.optimizer.applyGradients(grads);
-            
-            return value.dataSync()[0];
+            return tf.losses.softmaxCrossEntropy(labels, logits);
         });
+        
+        const { value, grads } = this.optimizer.computeGradients(loss, [this.userEmbeddings, this.itemEmbeddings]);
+        this.optimizer.applyGradients(grads);
+        tf.dispose(grads);
+        
+        const lossVal = await value.data();
+        tf.dispose(value);
+        return lossVal[0];
+    }
+}
+
+
+/**
+ * DeepTwoTowerModel: An advanced two-tower model using MLPs.
+ * This model incorporates user and item features to create richer representations.
+ * User Tower: Consumes user ID + user features (age, gender, occupation).
+ * Item Tower: Consumes item ID + item features (genres).
+ * Both towers are MLPs that output a final embedding.
+ */
+class DeepTwoTowerModel {
+    constructor(numUsers, numItems, embeddingDim, userFeatureDim, itemFeatureDim, hiddenLayers = [64, 32]) {
+        // ID Embeddings
+        this.userEmbeddings = tf.variable(tf.randomNormal([numUsers, embeddingDim], 0, 0.05), true, 'user_embeddings_deep');
+        this.itemEmbeddings = tf.variable(tf.randomNormal([numItems, embeddingDim], 0, 0.05), true, 'item_embeddings_deep');
+
+        // User Tower MLP Layers
+        this.userDense1 = tf.layers.dense({ units: hiddenLayers[0], activation: 'relu', inputShape: [embeddingDim + userFeatureDim] });
+        this.userDense2 = tf.layers.dense({ units: hiddenLayers[1], activation: null }); // Output layer
+
+        // Item Tower MLP Layers
+        this.itemDense1 = tf.layers.dense({ units: hiddenLayers[0], activation: 'relu', inputShape: [embeddingDim + itemFeatureDim] });
+        this.itemDense2 = tf.layers.dense({ units: hiddenLayers[1], activation: null }); // Output layer
+
+        this.trainableVars = [
+            this.userEmbeddings, this.itemEmbeddings,
+            ...this.userDense1.getWeights(), ...this.userDense2.getWeights(),
+            ...this.itemDense1.getWeights(), ...this.itemDense2.getWeights()
+        ];
+        
+        this.optimizer = tf.train.adam(0.001);
     }
     
-    getUserEmbedding(userIndex) {
+    // User tower: concatenates user ID embedding with features, then passes through an MLP.
+    userForward(userIdices, userFeatures) {
         return tf.tidy(() => {
-            return this.userForward([userIndex]).squeeze();
+            const idEmbs = tf.gather(this.userEmbeddings, userIdices);
+            const featureTensor = tf.tensor2d(userFeatures);
+            const combined = tf.concat([idEmbs, featureTensor], 1);
+            let output = this.userDense1.apply(combined);
+            output = this.userDense2.apply(output);
+            return tf.linalg.l2Normalize(output, -1); // Normalize output embedding
         });
     }
     
-    async getScoresForAllItems(userEmbedding) {
-        return await tf.tidy(() => {
-            // Compute dot product with all item embeddings
-            const scores = tf.dot(this.itemEmbeddings, userEmbedding);
-            return scores.dataSync();
+    // Item tower: concatenates item ID embedding with features, then passes through an MLP.
+    itemForward(itemIndices, itemFeatures) {
+        return tf.tidy(() => {
+            const idEmbs = tf.gather(this.itemEmbeddings, itemIndices);
+            const featureTensor = tf.tensor2d(itemFeatures);
+            const combined = tf.concat([idEmbs, featureTensor], 1);
+            let output = this.itemDense1.apply(combined);
+            output = this.itemDense2.apply(output);
+            return tf.linalg.l2Normalize(output, -1); // Normalize output embedding
         });
     }
+
+    async trainStep(userIdices, userFeatures, itemIndices, itemFeatures) {
+        const loss = () => tf.tidy(() => {
+            const userReps = this.userForward(userIdices, userFeatures);
+            const itemReps = this.itemForward(itemIndices, itemFeatures);
+            
+            // In-batch sampled softmax loss, same logic as the simple model.
+            const logits = tf.matMul(userReps, itemReps, false, true);
+            const labels = tf.oneHot(tf.range(0, userIdices.length, 1, 'int32'), userIdices.length);
+            
+            return tf.losses.softmaxCrossEntropy(labels, logits);
+        });
+
+        const { value, grads } = this.optimizer.computeGradients(loss, this.trainableVars);
+        this.optimizer.applyGradients(grads);
+        tf.dispose(grads);
+        
+        const lossVal = await value.data();
+        tf.dispose(value);
+        return lossVal[0];
+    }
     
-    getItemEmbeddings() {
-        // Return the tensor directly - call arraySync() on the tensor, not this method
-        return this.itemEmbeddings;
+    // Helper function for visualization, gets final embeddings for a sample of items.
+    getItemEmbeddings(itemIndices, itemFeatures) {
+        return this.itemForward(itemIndices, itemFeatures);
     }
 }
