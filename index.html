@@ -1,49 +1,70 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Two-Tower Movie Recommender</title>
+    <title>Two-Tower Movie Recommender Comparison</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .controls { margin: 20px 0; }
-        button { padding: 10px 15px; margin: 5px; font-size: 16px; }
-        .status { margin: 10px 0; padding: 10px; background: #f0f0f0; border-radius: 5px; }
-        .chart-container { margin: 20px 0; }
-        canvas { border: 1px solid #ccc; }
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
+        .container { max-width: 1600px; margin: 0 auto; }
+        h1, h2, h3 { color: #2c3e50; }
+        .controls { margin: 20px 0; padding: 15px; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        button { padding: 10px 15px; margin: 5px; font-size: 16px; cursor: pointer; background-color: #3498db; color: white; border: none; border-radius: 5px; transition: background-color 0.3s; }
+        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+        button:hover:not(:disabled) { background-color: #2980b9; }
+        .status { margin: 10px 0; padding: 10px; background: #ecf0f1; border-radius: 5px; border-left: 5px solid #3498db; }
+        .chart-container { margin: 20px 0; padding: 15px; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        canvas { border: 1px solid #ccc; border-radius: 5px; }
         .results { margin: 20px 0; }
+        .results-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .results-grid > div { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         table { border-collapse: collapse; width: 100%; margin: 10px 0; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
-        .side-by-side { display: flex; gap: 20px; }
-        .side-by-side > div { flex: 1; }
+        .usability-tips { margin-top: 30px; padding: 15px; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .usability-tips ul { padding-left: 20px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Two-Tower Movie Recommender</h1>
+        <h1>Two-Tower Recommender: Simple vs. Deep Model</h1>
         
         <div class="controls">
             <button id="loadData">Load Data</button>
-            <button id="train" disabled>Train</button>
-            <button id="test" disabled>Test</button>
+            <button id="train" disabled>Train Both Models</button>
+            <button id="test" disabled>Test & Compare</button>
         </div>
         
         <div id="status" class="status">Ready to load data...</div>
         
         <div class="chart-container">
-            <h3>Training Loss</h3>
+            <h3>Deep Model Training Loss</h3>
             <canvas id="lossChart" width="800" height="300"></canvas>
         </div>
         
         <div class="chart-container">
-            <h3>Item Embeddings (PCA)</h3>
+            <h3>Item Embeddings from Deep Model (PCA)</h3>
             <canvas id="embeddingChart" width="800" height="600"></canvas>
         </div>
         
         <div id="results" class="results"></div>
+
+        <div class="usability-tips">
+            <h3>How to Use This Demo</h3>
+            <ul>
+                <li><strong>Step 1: Load Data</strong> - Fetches the MovieLens 100K dataset (interactions, movie titles, genres, and user info). This may take a few seconds.</li>
+                <li><strong>Step 2: Train Both Models</strong> - Trains both a simple embedding model and a deep model. <strong>This is computationally intensive and can take several minutes</strong>, depending on your computer's performance. The browser may become unresponsive during training.</li>
+                <li><strong>Step 3: Test & Compare</strong> - After training, this button picks a random user and shows three lists: their actual highest-rated movies, recommendations from the simple model, and recommendations from the deep model.</li>
+            </ul>
+            <h3>How to Host on GitHub Pages</h3>
+            <ol>
+                <li>Create a new public GitHub repository.</li>
+                <li>Upload <code>index.html</code>, <code>app.js</code>, and <code>two-tower.js</code> to the root of the repository.</li>
+                <li>Create a <code>data</code> folder in the repository.</li>
+                <li>Download the MovieLens 100K dataset and place <code>u.data</code>, <code>u.item</code>, and <code>u.user</code> inside the <code>data</code> folder.</li>
+                <li>In your repository settings, go to the "Pages" section and enable GitHub Pages for your main branch.</li>
+            </ol>
+        </div>
     </div>
 
-    <!-- Load TensorFlow.js -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
     <script src="two-tower.js"></script>
     <script src="app.js"></script>
